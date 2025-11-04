@@ -6,6 +6,8 @@ First, I would make the ETL run automatically and not directly inside the FastAP
 Finally, I would connect it to a small web app so users can see their own recommendations easily.
 
 **You can see the screenshots below :**
+
+
 **1.**
 <img width="620" height="64" alt="Capture d’écran 2025-11-03 à 19 10 46" src="https://github.com/user-attachments/assets/ae038ce3-0557-4434-99dd-74176e3dd2e6" />
 **2.**
