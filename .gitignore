@@ -1,13 +1,7 @@
-# Runtime / volumes
 neo4j/data/
 neo4j/logs/
 postgres/data/
-postgres/init/*.backup
-
-# Python
+.env
 __pycache__/
 *.pyc
-
-# Env & système
-.env
 .DS_Store
