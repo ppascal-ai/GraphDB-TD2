@@ -1,0 +1,105 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: lab2-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=shop
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app
+    volumes:
+      # Mount seed SQLs so Postgres runs them on initialization
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Expose DB port to host for local debugging
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  neo4j:
+    image: neo4j:5.20.0
+    container_name: lab2-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/neo4jpassword
+      - NEO4J_PLUGINS=["apoc","graph-data-science"]
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/import:/import
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:7687 -u neo4j -p neo4jpassword 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 40s
+
+  app:
+    image: python:3.11-slim
+    container_name: lab2-app
+    restart: unless-stopped
+    working_dir: /workspace/app
+    env_file:
+      - .env
+    volumes:
+      - ./app:/workspace/app
+      - ./app/requirements.txt:/workspace/requirements.txt:ro
+      - ./app/start.sh:/workspace/start.sh:ro
+      - ./app/queries.cypher:/workspace/app/queries.cypher:ro
+    command: ["bash", "/workspace/start.sh"]
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+
+  checks:
+    image: alpine:3.20
+    container_name: lab2-checks
+    working_dir: /work
+    environment:
+      PGPASSWORD: app
+    depends_on:
+      app:
+        condition: service_started
+      postgres:
+        condition: service_started
+      neo4j:
+        condition: service_started
+    entrypoint: >
+      sh -lc '
+        set -euo pipefail;
+        apk add --no-cache curl postgresql-client jq >/dev/null;
+
+        echo "==> Checking FastAPI /health";
+        curl -sS -L --fail --show-error --max-time 60 http://app:8000/health \
+          | tee /tmp/health.json \
+          | jq -e ".ok == true" >/dev/null;
+        echo "✓ FastAPI health OK";
+
+        echo "==> Postgres sanity";
+        psql -h postgres -U app -d shop -c "SELECT * FROM orders LIMIT 5;";
+        psql -h postgres -U app -d shop -c "SELECT COUNT(*) AS products FROM products;";
+        echo "✓ Postgres queries OK";
+
+        echo "==> Trigger ETL via FastAPI (GET)"
+        curl -sS -L --fail --show-error --max-time 1800 \
+          http://app:8000/etl \
+          | tee /tmp/etl.json \
+          | jq -e ".ok == true" >/dev/null
+        echo "✓ ETL endpoint OK"
+
+        echo "==> Neo4j node count via HTTP API";
+        curl -sS -L --fail --show-error --max-time 60 \
+            -u neo4j:neo4jpassword \
+            -H "Content-Type: application/json" \
+            -d "{\"statements\":[{\"statement\":\"MATCH (n) RETURN count(n) AS c\"}]}" \
+            http://neo4j:7474/db/neo4j/tx/commit \
+        | tee /tmp/neo4j.json \
+        | jq -e ".results[0].data[0].row[0] | tonumber > 0" >/dev/null;
+        echo "✓ Neo4j has nodes";
+
+        echo "All checks passed.";
+      '
