@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Docker
+neo4j/data/
+neo4j/logs/
+postgres/data/
+postgres/init/*.backup
+
+# Environnement
+.env
+
+# System
+.DS_Store
